@@ -898,6 +898,73 @@ window.__DONGLE_EMBEDDED_DATA__ = {"generated_at":"2026-03-21T05:01:42Z","engine
 
   const API_BASE = window.location.origin;
 
+  function transformEmbeddedData(raw) {
+    // Transform embedded data format (live[] array) to the format the UI expects (profiles{} object)
+    const profiles = {};
+    const backtest_ref = {};
+    const riskLabels = { conservative: '2%', aggressive: '3%', ultra: '5%' };
+    
+    if (raw.live) {
+      for (const p of raw.live) {
+        const name = p.name;
+        const trades = p.trade_log || [];
+        const wins = trades.filter(t => t.pnl > 0).length;
+        const wr = trades.length > 0 ? Math.round(wins / trades.length * 1000) / 10 : 0;
+        
+        profiles[name] = {
+          state: {
+            current_equity: p.current_equity || p.start_equity,
+            start_equity: p.start_equity,
+            realized_pnl: p.realized_pnl || 0,
+            total_trades: p.total_trades || trades.length,
+            open_positions: (p.open_positions || []).length,
+            win_rate: wr,
+            last_update: p.last_updated || '',
+          },
+          meta: {
+            risk: riskLabels[name] || '2%',
+            lev: '3x',
+          },
+          equity_history: [],  // Will be populated if available
+          trade_log: trades,
+          open_positions_detail: p.open_positions || [],
+        };
+      }
+    }
+    
+    if (raw.backtest && raw.backtest.profiles) {
+      const btNames = ['conservative', 'aggressive', 'ultra'];
+      raw.backtest.profiles.forEach((bp, i) => {
+        const name = btNames[i] || 'unknown';
+        backtest_ref[name] = {
+          wr: bp.wr,
+          ret: bp.ret,
+          dd: bp.dd,
+          pf: bp.pf,
+          sharpe: bp.sharpe,
+          calmar: bp.calmar,
+          trades: bp.trades,
+          pm: bp.pm,
+          max_cl: bp.max_cl,
+          final_equity: bp.final_equity,
+          label: bp.label,
+          risk_pct: bp.risk_pct,
+          lev: bp.lev,
+        };
+      });
+    }
+    
+    return {
+      profiles: profiles,
+      backtest_ref: backtest_ref,
+      backtest: raw.backtest || {},
+      engine_version: raw.engine_version || 'v14.0',
+      total_virtual_equity: raw.total_virtual_equity || 0,
+      generated_at: raw.generated_at || '',
+      strategy: raw.strategy || {},
+    };
+  }
+
   async function fetchDashboard() {
     try {
       const res = await fetch(API_BASE + '/api/dashboard');
@@ -909,7 +976,7 @@ window.__DONGLE_EMBEDDED_DATA__ = {"generated_at":"2026-03-21T05:01:42Z","engine
     } catch(e) {
       // Fallback to embedded data (static deployment)
       if (window.__DONGLE_EMBEDDED_DATA__ && !dashboardData) {
-        dashboardData = window.__DONGLE_EMBEDDED_DATA__;
+        dashboardData = transformEmbeddedData(window.__DONGLE_EMBEDDED_DATA__);
         lastRefresh = new Date();
         updateUI();
         setStatus(true);
